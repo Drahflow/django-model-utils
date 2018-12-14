@@ -189,6 +189,29 @@ class FieldInstanceTracker(object):
                 setattr(self.instance.__class__, field, field_tracker)
 
 
+class FieldTrackerSaveClosure(object):
+    def __init__(self, tracker, original_save):
+        self.tracker = tracker
+        self.original_save = original_save
+
+    def __call__(self, instance, *args, **kwargs):
+        ret = self.original_save(instance, *args, **kwargs)
+        update_fields = kwargs.get('update_fields')
+        if not update_fields and update_fields is not None:  # () or []
+            fields = update_fields
+        elif update_fields is None:
+            fields = None
+        else:
+            fields = (
+                field for field in update_fields if
+                field in self.tracker.fields
+            )
+        getattr(instance, self.tracker.attname).set_saved_fields(
+            fields=fields
+        )
+        return ret
+
+
 class FieldTracker(object):
 
     tracker_class = FieldInstanceTracker
@@ -234,26 +257,7 @@ class FieldTracker(object):
         instance._instance_intialized = True
 
     def patch_save(self, model):
-        original_save = model.save
-
-        def save(instance, *args, **kwargs):
-            ret = original_save(instance, *args, **kwargs)
-            update_fields = kwargs.get('update_fields')
-            if not update_fields and update_fields is not None:  # () or []
-                fields = update_fields
-            elif update_fields is None:
-                fields = None
-            else:
-                fields = (
-                    field for field in update_fields if
-                    field in self.fields
-                )
-            getattr(instance, self.attname).set_saved_fields(
-                fields=fields
-            )
-            return ret
-
-        model.save = save
+        model.save = FieldTrackerSaveClosure(self, model.save)
 
     def __get__(self, instance, owner):
         if instance is None:
